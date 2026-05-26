@@ -1,3 +1,4 @@
+#include <Air_Quality_Detector_ML_inferencing.h>
 #include <Arduino.h>
 #include <Wire.h>
 #include <math.h>
@@ -34,6 +35,158 @@ unsigned long lastSampleMs = 0;
 unsigned long captureDurationMs = 0;
 
 const unsigned long SAMPLE_INTERVAL_MS = 1000;
+const unsigned long WARMUP_TIME_MS = 120000;
+
+float mlInputBuffer[EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE] = { 0 };
+size_t mlInputIndex = 0;
+bool mlBufferReady = false;
+bool warmupComplete = false;
+unsigned long deviceStartMs = 0;
+unsigned long lastWarmupPrintMs = 0;
+
+int getMlSignalData(size_t offset, size_t length, float *outPtr) {
+  memcpy(outPtr, mlInputBuffer + offset, length * sizeof(float));
+  return 0;
+}
+
+void printMlResult(ei_impulse_result_t &result) {
+  size_t bestIndex = 0;
+  float bestValue = result.classification[0].value;
+
+  for (size_t ix = 1; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
+    if (result.classification[ix].value > bestValue) {
+      bestValue = result.classification[ix].value;
+      bestIndex = ix;
+    }
+  }
+
+  Serial.print(F("ML prediction: "));
+  Serial.print(result.classification[bestIndex].label);
+  Serial.print(F(" ("));
+  Serial.print(bestValue, 5);
+  Serial.println(F(")"));
+
+  Serial.print(F("ML scores: "));
+  for (size_t ix = 0; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
+    Serial.print(result.classification[ix].label);
+    Serial.print(F("="));
+    Serial.print(result.classification[ix].value, 5);
+    if (ix + 1 < EI_CLASSIFIER_LABEL_COUNT) {
+      Serial.print(F(", "));
+    }
+  }
+  Serial.println();
+}
+
+void printMlWindowSummary() {
+  float sgp40Min = mlInputBuffer[0];
+  float sgp40Max = mlInputBuffer[0];
+  float sgp40Sum = 0.0f;
+  float vocMin = mlInputBuffer[1];
+  float vocMax = mlInputBuffer[1];
+  float vocSum = 0.0f;
+  float micsMin = mlInputBuffer[2];
+  float micsMax = mlInputBuffer[2];
+  float micsSum = 0.0f;
+
+  for (size_t ix = 0; ix < EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE; ix += EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME) {
+    float sgp40Raw = mlInputBuffer[ix];
+    float vocIndex = mlInputBuffer[ix + 1];
+    float micsRaw = mlInputBuffer[ix + 2];
+
+    sgp40Min = min(sgp40Min, sgp40Raw);
+    sgp40Max = max(sgp40Max, sgp40Raw);
+    sgp40Sum += sgp40Raw;
+
+    vocMin = min(vocMin, vocIndex);
+    vocMax = max(vocMax, vocIndex);
+    vocSum += vocIndex;
+
+    micsMin = min(micsMin, micsRaw);
+    micsMax = max(micsMax, micsRaw);
+    micsSum += micsRaw;
+  }
+
+  Serial.print(F("ML window summary: sgp40Raw avg/min/max="));
+  Serial.print(sgp40Sum / EI_CLASSIFIER_RAW_SAMPLE_COUNT, 1);
+  Serial.print(F("/"));
+  Serial.print(sgp40Min, 0);
+  Serial.print(F("/"));
+  Serial.print(sgp40Max, 0);
+
+  Serial.print(F(", vocIndex avg/min/max="));
+  Serial.print(vocSum / EI_CLASSIFIER_RAW_SAMPLE_COUNT, 1);
+  Serial.print(F("/"));
+  Serial.print(vocMin, 0);
+  Serial.print(F("/"));
+  Serial.print(vocMax, 0);
+
+  Serial.print(F(", micsRaw avg/min/max="));
+  Serial.print(micsSum / EI_CLASSIFIER_RAW_SAMPLE_COUNT, 1);
+  Serial.print(F("/"));
+  Serial.print(micsMin, 0);
+  Serial.print(F("/"));
+  Serial.println(micsMax, 0);
+}
+
+void runMlInferenceIfReady() {
+  if (!mlBufferReady) {
+    Serial.print(F("ML collecting stable samples: "));
+    Serial.print(mlInputIndex / EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME);
+    Serial.print(F("/"));
+    Serial.println(EI_CLASSIFIER_RAW_SAMPLE_COUNT);
+    return;
+  }
+
+  printMlWindowSummary();
+
+  signal_t signal;
+  signal.total_length = EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE;
+  signal.get_data = &getMlSignalData;
+
+  ei_impulse_result_t result = { 0 };
+  EI_IMPULSE_ERROR err = run_classifier(&signal, &result, false);
+
+  if (err != EI_IMPULSE_OK) {
+    Serial.print(F("ML error: "));
+    Serial.println((int)err);
+    return;
+  }
+
+  printMlResult(result);
+}
+
+void addMlSample(uint16_t sgp40Raw, int32_t vocIndex, int micsRaw) {
+  if (mlInputIndex >= EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE) {
+    memmove(
+      mlInputBuffer,
+      mlInputBuffer + EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME,
+      (EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE - EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME) * sizeof(float)
+    );
+    mlInputIndex = EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE - EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME;
+  }
+
+  size_t sampleNumber = (mlInputIndex / EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME) + 1;
+
+  mlInputBuffer[mlInputIndex++] = (float)sgp40Raw;
+  mlInputBuffer[mlInputIndex++] = (float)vocIndex;
+  mlInputBuffer[mlInputIndex++] = (float)micsRaw;
+
+  Serial.print(F("ML sample "));
+  Serial.print(sampleNumber);
+  Serial.print(F("/"));
+  Serial.print(EI_CLASSIFIER_RAW_SAMPLE_COUNT);
+  Serial.print(F(": sgp40Raw="));
+  Serial.print(sgp40Raw);
+  Serial.print(F(", vocIndex="));
+  Serial.print(vocIndex);
+  Serial.print(F(", micsRaw="));
+  Serial.println(micsRaw);
+
+  if (mlInputIndex >= EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE) {
+    mlBufferReady = true;
+  }
+}
 
 uint32_t getAbsoluteHumidity(float temperature, float humidity) {
   float absoluteHumidity =
@@ -126,6 +279,7 @@ void readSerialCommands() {
 void setup() {
   Serial.begin(115200);
   delay(1000);
+  deviceStartMs = millis();
 
   Wire.begin(SDA_PIN, SCL_PIN);
 
@@ -150,25 +304,25 @@ void setup() {
     Serial.println(F("SPS30 failed"));
     while (1) delay(100);
   }
+
+  Serial.print(F("Warming sensors for "));
+  Serial.print(WARMUP_TIME_MS / 1000);
+  Serial.println(F(" seconds before ML starts."));
 }
 
 void loop() {
   readSerialCommands();
 
-  if (!captureActive) return;
-
   unsigned long now = millis();
-  unsigned long elapsed = now - captureStartMs;
 
-  if (captureDurationMs > 0 && elapsed >= captureDurationMs) {
+  if (captureActive && captureDurationMs > 0 && now - captureStartMs >= captureDurationMs) {
     stopCapture();
-    return;
   }
 
   if (now - lastSampleMs < SAMPLE_INTERVAL_MS) return;
   lastSampleMs = now;
 
-  unsigned long timestamp = lastSampleMs - captureStartMs;
+  unsigned long timestamp = captureActive ? lastSampleMs - captureStartMs : lastSampleMs - deviceStartMs;
 
   float temperature = bme.readTemperature();
   float pressure = bme.readPressure() / 100.0F;
@@ -196,31 +350,48 @@ void loop() {
     );
   }
 
-  Serial.print(timestamp); Serial.print(',');
-  Serial.print(currentLabel); Serial.print(',');
+  if (!warmupComplete) {
+    unsigned long warmupElapsed = now - deviceStartMs;
 
-  Serial.print(temperature, 3); Serial.print(',');
-  Serial.print(pressure, 3); Serial.print(',');
-  Serial.print(humidity, 3); Serial.print(',');
-  Serial.print(absoluteHumidity); Serial.print(',');
+    if (warmupElapsed >= WARMUP_TIME_MS) {
+      warmupComplete = true;
+      Serial.println(F("Warm-up complete. ML sampling has started."));
+    } else if (now - lastWarmupPrintMs >= 10000) {
+      lastWarmupPrintMs = now;
+      Serial.print(F("Warming up, seconds remaining: "));
+      Serial.println((WARMUP_TIME_MS - warmupElapsed + 999) / 1000);
+    }
+  } else {
+    addMlSample(sgp40Raw, vocIndex, micsRaw);
+    runMlInferenceIfReady();
+  }
 
-  Serial.print(sgp40Raw); Serial.print(',');
-  Serial.print(vocIndex); Serial.print(',');
+  if (captureActive) {
+    Serial.print(timestamp); Serial.print(',');
+    Serial.print(currentLabel); Serial.print(',');
 
-  Serial.print(micsRaw); Serial.print(',');
-  Serial.print(micsVoltage, 3); Serial.print(',');
+    Serial.print(temperature, 3); Serial.print(',');
+    Serial.print(pressure, 3); Serial.print(',');
+    Serial.print(humidity, 3); Serial.print(',');
+    Serial.print(absoluteHumidity); Serial.print(',');
 
-  Serial.print(mc1p0); Serial.print(',');
-  Serial.print(mc2p5); Serial.print(',');
-  Serial.print(mc4p0); Serial.print(',');
-  Serial.print(mc10p0); Serial.print(',');
+    Serial.print(sgp40Raw); Serial.print(',');
+    Serial.print(vocIndex); Serial.print(',');
 
-  Serial.print(nc0p5); Serial.print(',');
-  Serial.print(nc1p0); Serial.print(',');
-  Serial.print(nc2p5); Serial.print(',');
-  Serial.print(nc4p0); Serial.print(',');
-  Serial.print(nc10p0); Serial.print(',');
+    Serial.print(micsRaw); Serial.print(',');
+    Serial.print(micsVoltage, 3); Serial.print(',');
 
-  Serial.println(typicalParticleSize);
-// hello jason
+    Serial.print(mc1p0); Serial.print(',');
+    Serial.print(mc2p5); Serial.print(',');
+    Serial.print(mc4p0); Serial.print(',');
+    Serial.print(mc10p0); Serial.print(',');
+
+    Serial.print(nc0p5); Serial.print(',');
+    Serial.print(nc1p0); Serial.print(',');
+    Serial.print(nc2p5); Serial.print(',');
+    Serial.print(nc4p0); Serial.print(',');
+    Serial.print(nc10p0); Serial.print(',');
+
+    Serial.println(typicalParticleSize);
+  }
 }
