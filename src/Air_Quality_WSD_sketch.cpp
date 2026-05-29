@@ -6,20 +6,27 @@
 #include "Adafruit_SGP40.h"
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
+#include <SPI.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ST7789.h>
+#include "toluene_scene.h"
+#include "benzene_scene.h"
+#include "xylene_scene.h"
 #define SDA_PIN 8
 #define SCL_PIN 9
 #define MICS_PIN 2
-#define SCK_PIN 
-#define DC_PIN
-#define SC_PIN
-#define MOSI_PIN
-#define BL_PIN
+#define SCK_PIN 12
+#define DC_PIN 13
+#define CS_PIN 10
+#define MOSI_PIN 11
+#define BL_PIN 14
 
 #define SEALEVELPRESSURE_HPA 1013.25
 
 Adafruit_BME280 bme;
 Adafruit_SGP40 sgp40;
 SensirionI2cSps30 sps30;
+Adafruit_ST7789 tft = Adafruit_ST7789(CS_PIN, DC_PIN, -1);
 
 #ifdef NO_ERROR
 #undef NO_ERROR
@@ -43,11 +50,122 @@ bool mlBufferReady = false;
 bool warmupComplete = false;
 unsigned long deviceStartMs = 0;
 unsigned long lastWarmupPrintMs = 0;
+long lastWarmupCountdownSeconds = -1;
+String lastDisplayLabel = "";
 
 int getMlSignalData(size_t offset, size_t length, float *outPtr) {
   memcpy(outPtr, mlInputBuffer + offset, length * sizeof(float));
   return 0;
 }
+
+void resetMlWindow() {
+  memset(mlInputBuffer, 0, sizeof(mlInputBuffer));
+  mlInputIndex = 0;
+  mlBufferReady = false;
+  Serial.println(F("ML window reset. Collecting 30 fresh samples before the next prediction."));
+}
+
+void drawWarmupCountdown(unsigned long secondsRemaining) {
+  if ((long)secondsRemaining == lastWarmupCountdownSeconds) return;
+  lastWarmupCountdownSeconds = secondsRemaining;
+
+  char countdownText[8];
+  snprintf(countdownText, sizeof(countdownText), "%lus", secondsRemaining);
+
+  tft.fillRect(0, 45, 240, 130, ST77XX_BLACK);
+  tft.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
+
+  tft.setTextSize(2);
+  tft.setCursor(18, 55);
+  tft.println("Warming sensors");
+
+  tft.setTextSize(1);
+  tft.setCursor(42, 82);
+  tft.println("ML starts in");
+
+  int16_t x1, y1;
+  uint16_t w, h;
+  tft.setTextSize(4);
+  tft.getTextBounds(countdownText, 0, 0, &x1, &y1, &w, &h);
+  tft.setCursor((240 - w) / 2, 105);
+  tft.print(countdownText);
+}
+
+void drawWarmupCompleteMessage() {
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
+  tft.setTextSize(2);
+  tft.setCursor(20, 65);
+  tft.println("Warmup done");
+  tft.setTextSize(1);
+  tft.setCursor(36, 105);
+  tft.println("Collecting ML samples");
+  lastDisplayLabel = "";
+}
+
+void drawPredictionBadge(const char *label, float confidence) {
+  char initial = (label != nullptr && label[0] != '\0') ? label[0] : '?';
+
+  tft.fillRect(0, 0, 48, 22, ST77XX_BLACK);
+  tft.drawRect(0, 0, 48, 22, ST77XX_WHITE);
+
+  tft.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
+  tft.setTextSize(1);
+  tft.setCursor(5, 7);
+  tft.print(initial);
+
+  tft.setCursor(17, 7);
+  tft.print(confidence, 2);
+}
+
+void showPredictionOnDisplay(const char *label, float confidence) {
+ 
+  if (strcmp(label, "MPBC") == 0) {
+    if (lastDisplayLabel != "MPBC") {
+      tft.drawRGBBitmap(0, 0, xyleneScene, 240, 240);
+      lastDisplayLabel = "MPBC";
+    }
+    drawPredictionBadge(label, confidence);
+    return;
+  }
+
+  if (strcmp(label, "Coffee") == 0) {
+    if (lastDisplayLabel != "Coffee") {
+      tft.drawRGBBitmap(0, 0, benzeneScene, 240, 240);
+      lastDisplayLabel = "Coffee";
+    }
+    drawPredictionBadge(label, confidence);
+    return;
+  }
+
+  if (strcmp(label, "Vinegar") == 0) {
+    if (lastDisplayLabel != "Vinegar") {
+      tft.drawRGBBitmap(0, 0, tolueneScene, TOLUENE_SCENE_WIDTH, TOLUENE_SCENE_HEIGHT);
+      lastDisplayLabel = "Vinegar";
+    }
+    drawPredictionBadge(label, confidence);
+    return;
+  }
+
+  lastDisplayLabel = label;
+  tft.fillScreen(ST77XX_BLACK);
+
+  tft.setTextSize(2);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setCursor(10, 20);
+  tft.println("Prediction:");
+
+  tft.setTextSize(3);
+  tft.setCursor(10, 70);
+  tft.println(label);
+
+  tft.setTextSize(2);
+  tft.setCursor(10, 130);
+  tft.print("Score: ");
+  tft.print(confidence, 2);
+  drawPredictionBadge(label, confidence);
+}
+
 
 void printMlResult(ei_impulse_result_t &result) {
   size_t bestIndex = 0;
@@ -76,6 +194,8 @@ void printMlResult(ei_impulse_result_t &result) {
     }
   }
   Serial.println();
+
+  showPredictionOnDisplay(result.classification[bestIndex].label, bestValue);
 }
 
 void printMlWindowSummary() {
@@ -259,6 +379,11 @@ void handleCommand(String cmd) {
     stopCapture();
     return;
   }
+
+  if (cmd.equalsIgnoreCase("RESETML")) {
+    resetMlWindow();
+    return;
+  }
 }
 
 void readSerialCommands() {
@@ -282,6 +407,20 @@ void setup() {
   deviceStartMs = millis();
 
   Wire.begin(SDA_PIN, SCL_PIN);
+
+  SPI.begin(SCK_PIN, -1, MOSI_PIN, CS_PIN);
+
+  pinMode(BL_PIN, OUTPUT);
+  digitalWrite(BL_PIN, HIGH);
+
+  tft.init(240, 240);
+  tft.setRotation(0);
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(10, 10);
+  tft.println("Air Quality WSD");
+  drawWarmupCountdown(WARMUP_TIME_MS / 1000);
 
   analogReadResolution(12);
   analogSetPinAttenuation(MICS_PIN, ADC_11db);
@@ -352,15 +491,19 @@ void loop() {
 
   if (!warmupComplete) {
     unsigned long warmupElapsed = now - deviceStartMs;
+    unsigned long secondsRemaining = warmupElapsed >= WARMUP_TIME_MS ? 0 : (WARMUP_TIME_MS - warmupElapsed + 999) / 1000;
 
     if (warmupElapsed >= WARMUP_TIME_MS) {
       warmupComplete = true;
       Serial.println(F("Warm-up complete. ML sampling has started."));
+      drawWarmupCompleteMessage();
     } else if (now - lastWarmupPrintMs >= 10000) {
       lastWarmupPrintMs = now;
       Serial.print(F("Warming up, seconds remaining: "));
-      Serial.println((WARMUP_TIME_MS - warmupElapsed + 999) / 1000);
+      Serial.println(secondsRemaining);
     }
+
+    drawWarmupCountdown(secondsRemaining);
   } else {
     addMlSample(sgp40Raw, vocIndex, micsRaw);
     runMlInferenceIfReady();

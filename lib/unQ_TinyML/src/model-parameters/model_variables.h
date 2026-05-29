@@ -115,7 +115,7 @@ ei_learning_block_config_tflite_graph_t ei_learning_block_config_1003776_3 = {
     .block_id = 3,
     .output_tensors_indices = ei_output_tensors_indices_1003776_3,
     .output_tensors_size = ei_output_tensors_size_1003776_3,
-    .quantized = 1,
+    .quantized = 0,
     .compiled = 1,
     .graph_config = (void*)&ei_config_graph_1003776_3,
     .dequantize_output = 0,
@@ -135,11 +135,6 @@ const ei_learning_block_t ei_learning_blocks_1003776_1[ei_learning_blocks_100377
     },
 };
 
-ei_fill_result_classification_i8_config_t ei_fill_result_classification_i8_config_1003776_3 = {
-    .zero_point = -128,
-    .scale = 0.00390625
-};
-
 const size_t ei_postprocessing_blocks_1003776_1_size = 1;
 const ei_postprocessing_block_t ei_postprocessing_blocks_1003776_1[ei_postprocessing_blocks_1003776_1_size] = {
     {
@@ -147,9 +142,9 @@ const ei_postprocessing_block_t ei_postprocessing_blocks_1003776_1[ei_postproces
         .type = EI_CLASSIFIER_MODE_CLASSIFICATION,
         .init_fn = NULL,
         .deinit_fn = NULL,
-        .postprocess_fn = &process_classification_i8,
+        .postprocess_fn = &process_classification_f32,
         .display_fn = NULL,
-        .config = (void*)&ei_fill_result_classification_i8_config_1003776_3,
+        .config = NULL,
         .input_block_id = 3
     },
 };
@@ -164,7 +159,7 @@ const ei_impulse_t impulse_1003776_1 = {
     .project_name = "Air Quality Detector ML",
     .impulse_id = 1,
     .impulse_name = "Impulse #1",
-    .deploy_version = 6,
+    .deploy_version = 7,
 
     .nn_input_frame_size = 18,
     .raw_sample_count = 30,
