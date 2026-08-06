@@ -13,7 +13,6 @@ This project combines multiple environmental sensors with on-device machine lear
 * Designed for wearable and battery-powered deployment
 
 ## Hardware
-
 * ESP32-S3
 * Sensirion SPS30 Particulate Matter Sensor
 * Sensirion SGP40 VOC Sensor
@@ -22,15 +21,10 @@ This project combines multiple environmental sensors with on-device machine lear
 
 ## Machine Learning
 
-The environmental data is collected and processed using Edge Impulse. A custom machine learning model is trained using real-world datasets and deployed directly to the microcontroller for low-power, real-time inference.
+The environmental data is collected and processed using Edge Impulse. A custom machine learning model is trained using real-world datasets and deployed directly to the microcontroller for low-power, real-time inference. data was recorded as CSV files and uploaded to edge impulse in the appropriate format.
 
-## Applications
+<img src="Training_photo.png" width="500">
 
-* Construction sites
-* Workshops
-* Manufacturing facilities
-* Industrial environments
-* Occupational health research
 
 ## Project Goals
 
