@@ -32,13 +32,6 @@ The environmental data is collected and processed using Edge Impulse. A custom m
 
 This repository documents the development of an embedded Edge AI system investigating how wearable sensing devices can provide contextual environmental awareness for workers. Rather than replacing professional monitoring equipment, the project demonstrates how low-cost sensor fusion and TinyML can be used to detect patterns associated with potentially hazardous air quality conditions while maintaining user privacy through entirely on-device processing.
 
-## Technologies
-
-* C++
-* Arduino
-* ESP32
-* Edge Impulse
-* TinyML
-* Embedded Systems
-* Sensor Fusion
-* Edge AI
+## Exhibit
+This project was exhibited to display the early stages of my Masters project. Individuals would place one of the jugs underneath the device and see firsthand how different chemicals are identified with precision. This exhibit was meant to start a conversation on how this technology could be deployed and used in the field to create safer work environments. 
+<img src="Presentation.png" width="500">
