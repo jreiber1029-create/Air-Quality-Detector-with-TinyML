@@ -1,6 +1,6 @@
 # Air Quality Detector with TinyML
 
-<img src="Device.png" width="500">
+<img src="Device.jpeg" width="500">
 
 A TinyML-powered wearable air quality monitoring system designed to provide real-time environmental awareness for workers in hazardous environments.
 
