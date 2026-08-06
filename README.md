@@ -1,5 +1,5 @@
 # Air Quality Detector with TinyML
-<img src="images/IMG_3365.jpeg" width="500">
+<img src="IMG_3365.jpeg" width="500">
 A TinyML-powered wearable air quality monitoring system designed to provide real-time environmental awareness for workers in hazardous environments.
 
 This project combines multiple environmental sensors with on-device machine learning to classify air quality without requiring an internet connection. The system is intended as a research prototype exploring how wearable Edge AI can improve occupational health and safety by providing private, low-latency hazard detection directly on embedded hardware. Due to the academic setting of the prototype, harmful substances could not be samples. Instead coffee, multi-purpose cleaner, and vinegar were used. Because these substances share very similar chemical footprints, being able to detect and differentiate between each of them displays the potential for a device like the one I have created.  
