@@ -34,4 +34,4 @@ This repository documents the development of an embedded Edge AI system investig
 
 ## Exhibit
 This project was exhibited to display the early stages of my Masters project. Individuals would place one of the jugs underneath the device and see firsthand how different chemicals are identified with precision. This exhibit was meant to start a conversation on how this technology could be deployed and used in the field to create safer work environments. 
-<img src="Presentation.png" width="500">
+<img src="presentation.png" width="500">
